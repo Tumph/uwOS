@@ -1,0 +1,23 @@
+{
+  "name": "uwos",
+  "version": "1.0.0",
+  "description": "operating system for waterloo students",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tumph/uwOS.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Tumph/uwOS/issues"
+  },
+  "homepage": "https://github.com/Tumph/uwOS#readme",
+  "devDependencies": {
+    "electron": "^35.0.3"
+  }
+}
