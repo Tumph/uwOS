@@ -1,4 +1,4 @@
-const { app, BrowserWindow, BrowserView, ipcMain } = require('electron/main')
+const { app, BrowserWindow, BrowserView, ipcMain, session } = require('electron/main')
 const path = require('node:path')
 const { EventEmitter } = require('events')
 
@@ -8,8 +8,10 @@ EventEmitter.defaultMaxListeners = 20;
 let mainWindow = null
 let webView = null
 let isWebViewActive = false
+let backButtonOverlay = null
 
 const createWindow = () => {
+  
   mainWindow = new BrowserWindow({
     width: 1000,
     height: 800,
@@ -18,175 +20,162 @@ const createWindow = () => {
       nodeIntegration: false,
       contextIsolation: true
     }
+
   })
 
   // Set max listeners for main window webContents
   mainWindow.webContents.setMaxListeners(20);
-  
+
   mainWindow.loadFile('index.html')
+}
+
+// Create a persistent back button overlay that sits on top of the BrowserView
+function createBackButtonOverlay() {
+  if (backButtonOverlay) {
+    mainWindow.removeBrowserView(backButtonOverlay)
+  }
+  
+  // Create a small overlay view for the back button
+  backButtonOverlay = new BrowserView({
+    webPreferences: {
+      preload: path.join(__dirname, 'overlay-preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      transparent: true
+    }
+  })
+  
+  // Set bounds for small area in top-left corner
+  backButtonOverlay.setBounds({ x: 0, y: 0, width: 200, height: 60 })
+  backButtonOverlay.setBackgroundColor('#00000000') // Transparent background
+  
+  // Load a minimal HTML for the back button
+  backButtonOverlay.webContents.loadFile('overlay.html')
+  
+  // Add the overlay view on top
+  mainWindow.addBrowserView(backButtonOverlay)
+  
+  // Make sure the overlay is on top
+  const views = mainWindow.getBrowserViews()
+  if (views.length > 1) {
+    // Remove and re-add to ensure it's on top
+    mainWindow.removeBrowserView(backButtonOverlay)
+    mainWindow.addBrowserView(backButtonOverlay)
+  }
+  
+  // Handle window resize
+  mainWindow.on('resize', () => {
+    if (backButtonOverlay) {
+      backButtonOverlay.setBounds({ x: 0, y: 0, width: 200, height: 60 })
+    }
+  })
 }
 
 // Handle link clicks from the renderer
 ipcMain.on('navigate-to-url', (event, url) => {
   if (!mainWindow) return
   
-  // Create a browser view if it doesn't exist
-  if (!webView) {
-    webView = new BrowserView({
-      webPreferences: {
-        preload: path.join(__dirname, 'webview-preload.js'),
-        nodeIntegration: false,
-        contextIsolation: true
-      }
-    })
-    
-    // Set max listeners for webContents and log the current count
-    webView.webContents.setMaxListeners(20);
-
-    // Set initial bounds to fill the window
-    const bounds = mainWindow.getBounds()
-    webView.setBounds({ 
-      x: 0, 
-      y: 0, 
-      width: bounds.width, 
-      height: bounds.height 
-    })
-    
-    // Resize the webView when window is resized
-    mainWindow.on('resize', () => {
-      if (isWebViewActive) {
-        const bounds = mainWindow.getBounds()
-        webView.setBounds({ 
-          x: 0, 
-          y: 0, 
-          width: bounds.width, 
-          height: bounds.height 
-        })
-      }
-    })
+  // First, remove existing webView if it exists to prevent old content from showing
+  if (webView && isWebViewActive) {
+    mainWindow.removeBrowserView(webView)
+    isWebViewActive = false
+    webView = null
   }
+  
+  // Also remove any existing back button overlay
+  if (backButtonOverlay) {
+    mainWindow.removeBrowserView(backButtonOverlay)
+    backButtonOverlay = null
+  }
+  
+  // Create a new browser view
+  webView = new BrowserView({
+    webPreferences: {
+      preload: path.join(__dirname, 'webview-preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  })
+  
+  // Set max listeners for webContents and log the current count
+  webView.webContents.setMaxListeners(20);
+
+  // Set initial bounds to fill the window
+  const bounds = mainWindow.getBounds()
+  webView.setBounds({ 
+    x: 0, 
+    y: 0, 
+    width: bounds.width, 
+    height: bounds.height 
+  })
+  
+  // Resize the webView when window is resized
+  mainWindow.on('resize', () => {
+    if (isWebViewActive && webView) {
+      const bounds = mainWindow.getBounds()
+      webView.setBounds({ 
+        x: 0, 
+        y: 0, 
+        width: bounds.width, 
+        height: bounds.height 
+      })
+    }
+  })
   
   // Attach the webView to the main window
   mainWindow.setBrowserView(webView)
   isWebViewActive = true
   
+  // Create and show the back button overlay
+  createBackButtonOverlay()
+  
+  // Set Content Security Policy headers
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': ["default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.aksharbarot.com; connect-src *; img-src * data:; style-src * 'unsafe-inline';"]
+      }
+    });
+  });
+  
   // Navigate to the URL
   webView.webContents.loadURL(url)
+  // Open devtools for the webView
+  webView.webContents.openDevTools();
+  // Listen for navigation events to ensure overlay stays on top
+  webView.webContents.on('did-start-navigation', () => {
+    if (backButtonOverlay) {
+      // Ensure overlay stays on top by removing and re-adding
+      mainWindow.removeBrowserView(backButtonOverlay)
+      mainWindow.addBrowserView(backButtonOverlay)
+    }
+  })
   
-  // Create back button overlay in the webView when the page finishes loading
-  webView.webContents.on('did-finish-load', () => {
-    injectBackButton(webView)
-  })
-
-  // Re-inject button when navigating to a new page
   webView.webContents.on('did-navigate', () => {
-    injectBackButton(webView)
-  })
-
-  // Re-inject button when navigating within the same page (hash changes, etc)
-  webView.webContents.on('did-navigate-in-page', () => {
-    injectBackButton(webView)
+    if (backButtonOverlay) {
+      // Ensure overlay stays on top by removing and re-adding
+      mainWindow.removeBrowserView(backButtonOverlay)
+      mainWindow.addBrowserView(backButtonOverlay)
+    }
   })
 });
 
-// Function to inject the back button into a webView
-function injectBackButton(view) {
-  view.webContents.executeJavaScript(`
-    (function() {
-      // Remove existing button if present
-      const existingButton = document.getElementById('electron-back-button');
-      if (existingButton) {
-        existingButton.remove();
-      }
-      
-      // Create a new button
-      const backButton = document.createElement('button');
-      backButton.id = 'electron-back-button';
-      backButton.innerHTML = '← Back to Launchpad';
-      backButton.style.position = 'fixed';
-      backButton.style.top = '10px';
-      backButton.style.left = '10px';
-      backButton.style.zIndex = '2147483647'; // Maximum z-index value
-      backButton.style.padding = '8px 12px';
-      backButton.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-      backButton.style.color = 'white';
-      backButton.style.border = 'none';
-      backButton.style.borderRadius = '4px';
-      backButton.style.cursor = 'pointer';
-      backButton.style.fontWeight = 'bold';
-      backButton.style.fontSize = '14px';
-      backButton.style.fontFamily = 'Arial, sans-serif';
-      backButton.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.3)';
-      backButton.style.pointerEvents = 'auto';
-      backButton.style.userSelect = 'none';
-      
-      // Use shadow DOM to isolate the button from page styles
-      const wrapper = document.createElement('div');
-      wrapper.style.position = 'fixed';
-      wrapper.style.top = '0';
-      wrapper.style.left = '0';
-      wrapper.style.zIndex = '2147483647';
-      wrapper.style.pointerEvents = 'none';
-      
-      // Attach shadow DOM to wrapper
-      const shadow = wrapper.attachShadow({ mode: 'closed' });
-      
-      // Add button to shadow DOM
-      shadow.appendChild(backButton);
-      
-      // Append wrapper to document
-      document.documentElement.appendChild(wrapper);
-      
-      // Set up click event
-      backButton.addEventListener('click', () => {
-        if (window.electronAPI && typeof window.electronAPI.goBack === 'function') {
-          window.electronAPI.goBack();
-        }
-      });
-      
-      // Create a MutationObserver to ensure the button stays in place
-      const observer = new MutationObserver(() => {
-        if (!document.contains(wrapper)) {
-          document.documentElement.appendChild(wrapper);
-        }
-      });
-      
-      // Start observing document for changes
-      observer.observe(document.documentElement, {
-        childList: true,
-        subtree: true
-      });
-      
-      // Add backup interval to check if button still exists
-      const checkInterval = setInterval(() => {
-        if (!document.contains(wrapper)) {
-          document.documentElement.appendChild(wrapper);
-        }
-      }, 1000);
-      
-      // Store interval ID for cleanup
-      window._electronBackButtonInterval = checkInterval;
-    })();
-  `).catch(err => {
-    console.error('Failed to inject back button:', err);
-  });
-}
-
 // Handle back button click
 ipcMain.on('go-back-to-launchpad', () => {
-  if (mainWindow && webView) {
-    // Clean up any intervals or observers in the webView
-    webView.webContents.executeJavaScript(`
-      if (window._electronBackButtonInterval) {
-        clearInterval(window._electronBackButtonInterval);
-        window._electronBackButtonInterval = null;
-      }
-    `).catch(err => {
-      console.error('Failed to clean up intervals:', err);
-    });
-    
+  if (mainWindow) {
     // Remove the webView
-    mainWindow.removeBrowserView(webView)
+    if (webView) {
+      mainWindow.removeBrowserView(webView)
+      webView = null
+    }
+    
+    // Remove the back button overlay
+    if (backButtonOverlay) {
+      mainWindow.removeBrowserView(backButtonOverlay)
+      backButtonOverlay = null
+    }
+    
     isWebViewActive = false
   }
 });
@@ -197,18 +186,18 @@ app.on('app-command', (e, cmd) => {
     if (webView.webContents.canGoBack()) {
       webView.webContents.goBack()
     } else {
-      // Clean up any intervals or observers in the webView
-      webView.webContents.executeJavaScript(`
-        if (window._electronBackButtonInterval) {
-          clearInterval(window._electronBackButtonInterval);
-          window._electronBackButtonInterval = null;
-        }
-      `).catch(err => {
-        console.error('Failed to clean up intervals:', err);
-      });
+      // Go back to launchpad
+      if (webView) {
+        mainWindow.removeBrowserView(webView)
+        webView = null
+      }
       
-      // If can't go back in web history, go back to launchpad
-      mainWindow.removeBrowserView(webView)
+      // Remove the back button overlay
+      if (backButtonOverlay) {
+        mainWindow.removeBrowserView(backButtonOverlay)
+        backButtonOverlay = null
+      }
+      
       isWebViewActive = false
     }
   }
@@ -220,18 +209,18 @@ app.on('swipe', (e, direction) => {
     if (webView.webContents.canGoBack()) {
       webView.webContents.goBack()
     } else {
-      // Clean up any intervals or observers in the webView
-      webView.webContents.executeJavaScript(`
-        if (window._electronBackButtonInterval) {
-          clearInterval(window._electronBackButtonInterval);
-          window._electronBackButtonInterval = null;
-        }
-      `).catch(err => {
-        console.error('Failed to clean up intervals:', err);
-      });
+      // Go back to launchpad
+      if (webView) {
+        mainWindow.removeBrowserView(webView)
+        webView = null
+      }
       
-      // If can't go back in web history, go back to launchpad
-      mainWindow.removeBrowserView(webView)
+      // Remove the back button overlay
+      if (backButtonOverlay) {
+        mainWindow.removeBrowserView(backButtonOverlay)
+        backButtonOverlay = null
+      }
+      
       isWebViewActive = false
     }
   }

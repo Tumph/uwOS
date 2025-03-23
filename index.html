@@ -32,11 +32,12 @@
             max-width: 300px;
             margin: 20px auto 40px;
             text-align: center;
+            position: relative;
         }
 
         .search-bar {
             width: 100%;
-            padding: 8px 15px;
+            padding: 8px 35px 8px 15px;
             border-radius: 20px;
             border: none;
             background-color: rgba(255, 255, 255, 0.2);
@@ -55,15 +56,36 @@
             background-color: rgba(255, 255, 255, 0.25);
         }
 
+        .clear-search {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.3);
+            color: white;
+            font-size: 12px;
+            line-height: 16px;
+            text-align: center;
+            cursor: pointer;
+            display: none;
+        }
+        
+        .clear-search:hover {
+            background-color: rgba(255, 255, 255, 0.5);
+        }
+
         /* App Grid */
         .app-grid {
-            display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
             gap: 40px;
             width: 100%;
             max-width: 1000px;
             margin: 0 auto;
-            justify-items: center;
         }
 
         /* App Icon */
@@ -72,8 +94,9 @@
             flex-direction: column;
             align-items: center;
             text-decoration: none;
-            transition: transform 0.2s ease;
+            transition: transform 0.2s ease, opacity 0.3s ease;
             width: 120px;
+            margin: 0 15px;
         }
 
         .app-icon:hover {
@@ -138,14 +161,12 @@
         /* Responsive adjustments */
         @media (max-width: 900px) {
             .app-grid {
-                grid-template-columns: repeat(3, 1fr);
                 gap: 30px;
             }
         }
 
         @media (max-width: 600px) {
             .app-grid {
-                grid-template-columns: repeat(2, 1fr);
                 gap: 25px;
             }
             
@@ -161,7 +182,6 @@
 
         @media (max-width: 400px) {
             .app-grid {
-                grid-template-columns: repeat(2, 1fr);
                 gap: 20px;
             }
             
@@ -181,6 +201,7 @@
     <!-- Search Bar -->
     <div class="search-container">
         <input type="text" class="search-bar" placeholder="Search">
+        <span class="clear-search">✗</span>
     </div>
 
     <!-- App Grid -->
@@ -373,11 +394,13 @@
     </div>
 </body>
 <script>
-    // Add click event listeners to all app icons
     document.addEventListener('DOMContentLoaded', () => {
-        const appLinks = document.querySelectorAll('.app-icon');
+        const searchBar = document.querySelector('.search-bar');
+        const clearSearch = document.querySelector('.clear-search');
+        const appIcons = document.querySelectorAll('.app-icon');
         
-        appLinks.forEach(link => {
+        // Add click event listeners to all app icons
+        appIcons.forEach(link => {
             link.addEventListener('click', (event) => {
                 event.preventDefault();
                 const url = link.getAttribute('href');
@@ -389,6 +412,71 @@
                     console.error('Electron API not available');
                 }
             });
+        });
+        
+        // Filter apps based on search input
+        function filterApps(searchText) {
+            const searchLower = searchText.toLowerCase();
+            
+            // Show/hide clear button
+            if (searchText.length > 0) {
+                clearSearch.style.display = 'block';
+            } else {
+                clearSearch.style.display = 'none';
+            }
+            
+            appIcons.forEach(appIcon => {
+                const appName = appIcon.querySelector('.app-name').textContent.toLowerCase();
+                if (searchText === '' || appName.startsWith(searchLower)) {
+                    appIcon.style.opacity = '1';
+                    appIcon.style.transform = 'scale(1)';
+                    // Use setTimeout to prevent immediate display:none on matched items
+                    setTimeout(() => {
+                        if (appIcon.style.opacity === '1') {
+                            appIcon.style.display = 'flex';
+                        }
+                    }, 50);
+                } else {
+                    appIcon.style.opacity = '0';
+                    appIcon.style.transform = 'scale(0.8)';
+                    // Hide element after transition completes
+                    setTimeout(() => {
+                        if (appIcon.style.opacity === '0') {
+                            appIcon.style.display = 'none';
+                        }
+                    }, 300);
+                }
+            });
+        }
+        
+        // Listen for input in search bar
+        searchBar.addEventListener('input', (e) => {
+            filterApps(e.target.value);
+        });
+        
+        // Handle clear button click
+        clearSearch.addEventListener('click', () => {
+            searchBar.value = '';
+            filterApps('');
+            searchBar.focus();
+        });
+        
+        // Clear search when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!searchBar.contains(e.target) && !clearSearch.contains(e.target)) {
+                searchBar.value = '';
+                filterApps('');
+            }
+        });
+        
+        // Prevent clicks inside the search bar from propagating
+        searchBar.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+        
+        // Prevent clicks on clear button from propagating
+        clearSearch.addEventListener('click', (e) => {
+            e.stopPropagation();
         });
     });
 </script>
