@@ -129,20 +129,10 @@ ipcMain.on('navigate-to-url', (event, url) => {
   // Create and show the back button overlay
   createBackButtonOverlay()
   
-  // Set Content Security Policy headers
-  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': ["default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.aksharbarot.com; connect-src *; img-src * data:; style-src * 'unsafe-inline';"]
-      }
-    });
-  });
   
   // Navigate to the URL
   webView.webContents.loadURL(url)
-  // Open devtools for the webView
-  webView.webContents.openDevTools();
+
   // Listen for navigation events to ensure overlay stays on top
   webView.webContents.on('did-start-navigation', () => {
     if (backButtonOverlay) {
