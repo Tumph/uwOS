@@ -1,4 +1,4 @@
-const { app, BrowserWindow, BrowserView, ipcMain, session } = require('electron/main')
+const { app, BrowserWindow, BrowserView, ipcMain, session, shell } = require('electron/main')
 const path = require('node:path')
 const { EventEmitter } = require('events')
 
@@ -74,6 +74,12 @@ function createBackButtonOverlay() {
 // Handle link clicks from the renderer
 ipcMain.on('navigate-to-url', (event, url) => {
   if (!mainWindow) return
+  
+  // Check if the URL is spots.aksharbarot.com and open in default browser
+  if (url.includes('spots.aksharbarot.com')) {
+    shell.openExternal(url)
+    return
+  }
   
   // First, remove existing webView if it exists to prevent old content from showing
   if (webView && isWebViewActive) {
